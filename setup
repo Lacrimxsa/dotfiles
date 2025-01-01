@@ -1,40 +1,50 @@
 #!/bin/bash
-# Editado para un setup básico sin usuario extra ni 1Password
+# -----------------------------------------------------------------------------
+# Nombre: setup.sh
+# Descripción:
+#   Aprovisiona un sistema Debian/Ubuntu con:
+#     - Swap extra (4GB)
+#     - Repos externos (GitHub CLI, HashiCorp)
+#     - Paquetes básicos (docker, zsh, tmux, etc.)
+#     - Locales
+#     - Rust + starship
+#     - Compilación de Neovim (rama stable)
+#     - Stow de dotfiles (xero/dotfiles) sin 1Password
+# -----------------------------------------------------------------------------
 
-# -- Variables globales básicas --
-MYHOME="$HOME"                  # puedes cambiarlo si deseas apuntar a otro home
-ARCH="x86"                      # "arm" o "x86" según tu arquitectura
+# Variables de entorno
+MYHOME="$HOME"       # Carpeta de usuario donde se clonarán dotfiles, etc.
+ARCH="x86"           # Cambiar a "arm" si tu CPU es ARM (Raspberry Pi, etc.)
 PKGARCH="$ARCH"
 
-# Función helper para imprimir títulos
+# Función de helper para imprimir encabezados
 function _echo() {
-  printf "\n╓───── %s \n╙────────────────────────────────────── ─ ─ \n" "$1"
+  printf "\n=== %s ===\n\n" "$1"
 }
 
-# Comprobar que se ejecuta como root
-[ "$(id -u)" -ne 0 ] && {
-  echo "Por favor, ejecuta este script como root (o con sudo)."
+# 1) Asegurar que somos root
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: Debes ejecutar este script como root o con sudo."
   exit 1
-}
+fi
 
-# --------------------------------------------------------------------
-_echo "Creando swap (4GB)"
+# 2) Crear Swap (4GB) - OPCIONAL
+_echo "Creando un archivo swap de 4GB en /swapmeet"
 dd if=/dev/zero of=/swapmeet bs=128M count=32
 chmod 600 /swapmeet
 mkswap /swapmeet
 swapon /swapmeet
-swapon -s
+# Añadirlo a /etc/fstab para que persista en reinicios
 echo "/swapmeet swap swap defaults 0 0" >> /etc/fstab
+# Ajustar swappiness a 0 (para que use la RAM primero)
 echo "vm.swappiness=0" >> /etc/sysctl.conf
 sysctl vm.swappiness=0
 
-# --------------------------------------------------------------------
-_echo "Instalando dependencias básicas"
+# 3) Instalar dependencias básicas y configurar locales
+_echo "Instalando paquetes básicos (git, gnupg, etc.) y configurando locales"
 apt update
-apt install -y git gpg bash curl locales gnupg software-properties-common
+apt install -y git gpg bash curl gnupg software-properties-common locales
 
-# --------------------------------------------------------------------
-_echo "Configurando locales y consola"
 locale-gen "en_US.UTF-8"
 localectl set-locale en_US.UTF-8
 dpkg-reconfigure locales
@@ -42,8 +52,9 @@ dpkg-reconfigure console-setup
 systemctl daemon-reload
 systemctl restart console-setup.service
 
-# --------------------------------------------------------------------
-_echo "Añadiendo apt sources (GitHub CLI, HashiCorp...)"
+# 4) Añadir repositorios externos (GitHub CLI, HashiCorp)
+_echo "Añadiendo repos de GitHub CLI y HashiCorp"
+
 # GitHub CLI
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -52,7 +63,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githu
   https://cli.github.com/packages stable main" \
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
 
-# Hashicorp
+# HashiCorp
 curl -sL https://apt.releases.hashicorp.com/gpg \
   | gpg --dearmor \
   | tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
@@ -63,170 +74,115 @@ echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
   https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
   | tee /etc/apt/sources.list.d/hashicorp.list
 
-# --------------------------------------------------------------------
-_echo "Instalando gran parte de los paquetes del autor"
+# 5) Instalar el gran bloque de paquetes
+_echo "Instalando paquetes principales (docker, zsh, tmux, gh, etc.)"
 apt update
 DEBIAN_FRONTEND=noninteractive apt install -y \
-  apparmor \
-  apt-utils \
-  autoconf \
-  automake \
-  awscli \
-  bash \
-  bash-completion \
-  bc \
-  build-essential \
-  ca-certificates \
-  cmake \
-  coreutils \
-  curl \
   docker.io \
-  doxygen \
-  fzf \
-  g++ \
-  gcc \
-  gettext \
+  tmux \
+  zsh \
   gh \
-  git \
-  golang \
-  gpg \
-  htop \
-  jq \
-  keychain \
-  kubernetes-client \
+  stow \
+  curl \
+  build-essential \
+  cmake \
+  ninja-build \
   libevent-dev \
   libncurses5-dev \
-  libprotobuf-dev \
   libssl-dev \
   libtool \
   libtool-bin \
-  libutempter-dev \
-  libx11-dev \
-  libxfixes-dev \
-  lua5.4 \
-  luarocks \
-  man-db \
-  ncurses-term \
-  net-tools \
-  netbase \
-  ninja-build \
-  nmap \
-  openssh-client \
-  openssh-server \
   pkg-config \
-  protobuf-compiler \
-  python3 \
-  python3-pip \
-  python3-venv \
   ripgrep \
   shellcheck \
   silversearcher-ag \
-  socat \
-  stow \
-  sudo \
-  tar \
-  tmux \
+  python3 \
+  python3-pip \
+  python3-venv \
   tree \
-  tzdata \
   unzip \
-  vim-tiny \
-  whois \
-  xsel \
   xz-utils \
-  zlib1g-dev \
-  zsh \
-  zsh-syntax-highlighting
+  man-db \
+  htop \
+  net-tools \
+  tzdata \
+  whois \
+  # Agrega aquí otros que necesites
 
-# --------------------------------------------------------------------
-_echo "Algunas configuraciones systemd"
 systemctl stop docker.service
 systemctl stop containerd.service
+systemctl daemon-reload
 
-# --------------------------------------------------------------------
-_echo "Configurando timezone (ej. America/New_York)"
+# 6) Configurar la zona horaria (opcional)
+_echo "Ajustando timezone a America/New_York (modifícalo si deseas otra zona)"
 timedatectl set-timezone America/New_York
 
-# --------------------------------------------------------------------
-# (Opcional) Cambiar hostname (comentar si no lo necesitas)
-# HOSTNAME="thirteen"
-# hostname "$HOSTNAME"
-# hostnamectl set-hostname "$HOSTNAME"
-# sed -i '/^127\.0\.0\.1\s/s/$/ '"$HOSTNAME"'/' /etc/hosts
-
-# --------------------------------------------------------------------
-_echo "Instalando Rust con rustup"
+# 7) Instalar Rust y starship
+_echo "Instalando Rust (rustup) y starship"
 curl https://sh.rustup.rs -sSf \
   | CARGO_HOME="$MYHOME/.local/lib/cargo" \
     RUSTUP_HOME="$MYHOME/.local/lib/rustup" \
     sh -s -- -y --default-toolchain stable --profile default
 
-# Instalar cargo-quickinstall + utilidades
+# Instalar cargo-quickinstall para bajar binarios precompilados
 CARGO_HOME="$MYHOME/.local/lib/cargo" \
 RUSTUP_HOME="$MYHOME/.local/lib/rustup" \
 $MYHOME/.local/lib/cargo/bin/cargo install cargo-quickinstall
 
+# Instalar starship via cargo
 CARGO_HOME="$MYHOME/.local/lib/cargo" \
 RUSTUP_HOME="$MYHOME/.local/lib/rustup" \
-$MYHOME/.local/lib/cargo/bin/cargo quickinstall lolcat stylua
+$MYHOME/.local/lib/cargo/bin/cargo quickinstall starship
 
-# --------------------------------------------------------------------
-_echo "Instalando starship (prompt)"
-if [[ "$ARCH" == "arm" ]]; then
-  curl -sS https://starship.rs/install.sh | sh
-else
-  CARGO_HOME="$MYHOME/.local/lib/cargo" \
-  RUSTUP_HOME="$MYHOME/.local/lib/rustup" \
-  $MYHOME/.local/lib/cargo/bin/cargo quickinstall starship
-fi
-
-# --------------------------------------------------------------------
-_echo "Compilando Neovim desde fuente (rama stable)"
-git clone --depth=1 https://github.com/neovim/neovim.git -b stable "$MYHOME/.local/src/neovim"
-cd "$MYHOME/.local/src/neovim"
-CMAKE_BUILD_TYPE=RelWithDebInfo make
+# 8) Compilar Neovim desde fuente
+_echo "Clonando y compilando Neovim (rama stable)"
+mkdir -p "$MYHOME/.local/src"
+cd "$MYHOME/.local/src"
+git clone --depth=1 https://github.com/neovim/neovim.git -b stable neovim
+cd neovim
+make CMAKE_BUILD_TYPE=RelWithDebInfo
 make install
 
-# --------------------------------------------------------------------
-_echo "Clonando dotfiles y stow (ajusta según tu fork o repo)"
+# 9) Clonar dotfiles y usar stow
+_echo "Clonando dotfiles (xero) y usando stow para enlazar configuraciones"
 cd "$MYHOME/.local/src"
-git clone https://github.com/xero/dotfiles.git dotfiles
+git clone https://github.com/xero/dotfiles.git
 cd dotfiles
 
-# stow varios directorios al $MYHOME (ajusta según tus carpetas)
+# Si ya existen archivos en ~/.config/zsh o ~/.config/starship.toml, stow dará conflicto.
+# puedes renombrarlos o borrarlos antes.
 stow bin fun git gpg ssh tmux neovim zsh -t "$MYHOME"
 
-# --------------------------------------------------------------------
-_echo "Instalando plugins de tmux"
+# 10) Instalar plugins de tmux (ej. TPM)
+_echo "Instalando plugins de tmux (TPM)"
 mkdir -p "$MYHOME/.config/tmux/plugins"
-git clone --depth=1 https://github.com/tmux-plugins/tpm "$MYHOME/.config/tmux/plugins/tpm"
-"$MYHOME/.config/tmux/plugins/tpm/scripts/install_plugins.sh" 
-# (Opcional) ejemplo con "tmux-thumbs"
-if [[ -d "$MYHOME/.config/tmux/plugins/tmux-thumbs" ]]; then
-  cd "$MYHOME/.config/tmux/plugins/tmux-thumbs"
-  expect -c "spawn ./tmux-thumbs-install.sh; send \"\r1\r\"; expect complete" 1> /dev/null
-fi
+git clone --depth=1 https://github.com/tmux-plugins/tpm \
+  "$MYHOME/.config/tmux/plugins/tpm"
+"$MYHOME/.config/tmux/plugins/tpm/scripts/install_plugins.sh"
 
-# --------------------------------------------------------------------
-_echo "Instalando Lazy.nvim y Mason"
+# 11) Instalar Lazy.nvim y Mason (Neovim)
+_echo "Instalando Lazy.nvim y plugins con Mason"
 mkdir -p "$MYHOME/.local/share/nvim/lazy"
-git clone --filter=blob:none --single-branch https://github.com/folke/lazy.nvim.git "$MYHOME/.local/share/nvim/lazy"
+git clone --filter=blob:none --single-branch \
+  https://github.com/folke/lazy.nvim.git \
+  "$MYHOME/.local/share/nvim/lazy"
+
+# Realiza la instalación de plugins en modo headless
 nvim --headless "+Lazy! sync" +qa
 nvim --headless "+MasonInstallAll" +qa
 
-# --------------------------------------------------------------------
-_echo "Ejemplo de MOTD personalizado (puedes quitarlo si no quieres cambiarlo)"
-rm /etc/motd /etc/update-motd.d/* 2>/dev/null
-cat << 'MOTD' > /etc/update-motd.d/00-banner
-#!/bin/bash
-echo "Bienvenido a tu servidor (script xero mod). Disfruta la terminal!"
-MOTD
-chmod +x /etc/update-motd.d/00-banner
-
-# --------------------------------------------------------------------
-_echo "Limpiar e información final"
-# (Quita o comenta si no quieres manipular ssh)
+# 12) (Opcional) Cambiar el puerto SSH, etc.
 # echo "Port 60806" >> /etc/ssh/sshd_config
 # systemctl restart ssh
 
-echo "Setup completo. Revisa todo antes de usarlo en producción."
-echo "Si deseas reiniciar, hazlo manualmente:  sudo reboot"
+# 13) Personalizar motd
+_echo "Personalizando el motd (mensaje de bienvenida)"
+rm /etc/motd /etc/update-motd.d/* 2>/dev/null
+cat << 'MOTD' > /etc/update-motd.d/00-banner
+#!/bin/bash
+echo "Bienvenido! (script xero-dots modificado). Disfruta tu nuevo entorno!"
+MOTD
+chmod +x /etc/update-motd.d/00-banner
+
+# Fin
+_echo "Setup completado. Puedes reiniciar manualmente con 'sudo reboot' si lo deseas."
